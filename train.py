@@ -10,35 +10,47 @@ from matplotlib import pyplot as plt
 plt.ion()
 import os
 
-from dataset.dataset_class import PreprocessDataset
+from dataset.dataset_class import PreprocessDataset, VidDataSet
 from dataset.video_extraction_conversion import *
 from loss.loss_discriminator import *
 from loss.loss_generator import *
 from network.blocks import *
 from network.model import *
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import datetime
 
-from params.params import K, path_to_chkpt, path_to_backup, path_to_Wi, batch_size, path_to_preprocess, frame_shape
-
+from params.params import *
 """Create dataset and net"""
+os.environ["CUDA_VISIBLE_DEVICES"]="1,2,3"
 display_training = False
 device = torch.device("cuda:0")
 cpu = torch.device("cpu")
+
+path_to_chkpt = os.path.join(path_to_chkpt, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+
 dataset = PreprocessDataset(K=K, path_to_preprocess=path_to_preprocess, path_to_Wi=path_to_Wi)
+# dataset = VidDataSet(K=K, path_to_mp4=path_to_preprocess, device=device)
 dataLoader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
                         num_workers=16,
                         pin_memory=True,
                         drop_last = True)
 
-G = nn.DataParallel(Generator(frame_shape).to(device))
-E = nn.DataParallel(Embedder(frame_shape).to(device))
-D = nn.DataParallel(Discriminator(dataset.__len__(), path_to_Wi).to(device))
+if torch.cuda.device_count() > 1:
+    print("Let's use", torch.cuda.device_count(), "GPUs!")
+    # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+    G = nn.DataParallel(Generator(frame_shape).to(device))
+    E = nn.DataParallel(Embedder(frame_shape).to(device))
+    D = nn.DataParallel(Discriminator(dataset.__len__(), path_to_Wi).to(device))
+
+else:
+    G = Generator(frame_shape).to(device)
+    E = Embedder(frame_shape).to(device)
+    D = Discriminator(dataset.__len__(), path_to_Wi).to(device)
 
 G.train()
 E.train()
 D.train()
-
-
 optimizerG = optim.Adam(params = list(E.parameters()) + list(G.parameters()),
                         lr=5e-5,
                         amsgrad=False)
@@ -109,7 +121,9 @@ pbar = tqdm(dataLoader, leave=True, initial=0)
 if not display_training:
     matplotlib.use('agg')
 
+writer = SummaryWriter()
 
+counter = 0
 for epoch in range(epochCurrent, num_epochs):
     if epoch > epochCurrent:
         i_batch_current = 0
@@ -146,8 +160,12 @@ for epoch in range(epochCurrent, num_epochs):
                 """####################################################################################################################################################
                 r, D_res_list = D(x, g_y, i)"""
 
-                lossG = criterionG(x, x_hat, r_hat, D_res_list, D_hat_res_list, e_vectors, D.module.W_i, i)
-                
+                dict_loss_G = criterionG(x, x_hat, r_hat, D_res_list, D_hat_res_list, e_vectors, D.module.W_i, i)
+                lossG = torch.tensor(0.)
+                for k,v in dict_loss_G.iteritems():
+                    writer.add_scalar("Loss/train/" + k, v, counter)
+                    lossG += v
+
                 """####################################################################################################################################################
                 lossD = criterionDfake(r_hat) + criterionDreal(r)
                 loss = lossG + lossD
@@ -184,6 +202,9 @@ for epoch in range(epochCurrent, num_epochs):
                 lossDreal = criterionDreal(r)
                 
                 lossD = lossDfake + lossDreal
+                writer.add_scalar("Loss/train/lossDreal", lossDreal, counter)
+                writer.add_scalar("Loss/train/lossDfake", lossDfake, counter)
+                writer.add_scalar("Loss/train/lossD", lossD, counter)
                 lossD.backward(retain_graph=False)
                 optimizerD.step()
                 #for p in D.module.parameters():
@@ -194,16 +215,16 @@ for epoch in range(epochCurrent, num_epochs):
                     
 
         # Output training stats
-        if i_batch % 1 == 0 and i_batch > 0:
+        if i_batch % print_freq == 0 and i_batch > 0:
             #batch_end = datetime.now()
             #avg_time = (batch_end - batch_start) / 100
             # print('\n\navg batch time for batch size of', x.shape[0],':',avg_time)
             
             #batch_start = datetime.now()
             
-            # print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(y)): %.4f'
-            #       % (epoch, num_epochs, i_batch, len(dataLoader),
-            #          lossD.item(), lossG.item(), r.mean(), r_hat.mean()))
+            print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(y)): %.4f'
+                  % (epoch, num_epochs, i_batch, len(dataLoader),
+                     lossD.item(), lossG.item(), r.mean(), r_hat.mean()))
             pbar.set_postfix(epoch=epoch, r=r.mean().item(), rhat=r_hat.mean().item(), lossG=lossG.item())
 
             if display_training:
@@ -237,15 +258,7 @@ for epoch in range(epochCurrent, num_epochs):
             
             
 
-        if i_batch % 1000 == 999:
-            lossesD.append(lossD.item())
-            lossesG.append(lossG.item())
-
-            if display_training:
-                plt.clf()
-                plt.plot(lossesG) #blue
-                plt.plot(lossesD) #orange
-                plt.show()
+        if i_batch % log_freq == 0:
 
             print('Saving latest...')
             torch.save({
@@ -280,7 +293,7 @@ for epoch in range(epochCurrent, num_epochs):
                 'i_batch': i_batch,
                 'optimizerG': optimizerG.state_dict(),
                 'optimizerD': optimizerD.state_dict()
-                }, path_to_backup)
+                }, path_to_chkpt)
         out = (x_hat[0]*255).transpose(0,2)
         for img_no in range(1,2):
             out = torch.cat((out, (x_hat[img_no]*255).transpose(0,2)), dim = 1)

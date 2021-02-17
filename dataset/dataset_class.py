@@ -12,7 +12,7 @@ class VidDataSet(Dataset):
         self.K = K
         self.path_to_mp4 = path_to_mp4
         self.device = device
-        self.face_aligner = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device ='cuda:0')
+        self.face_aligner = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device = self.device)
     
     def __len__(self):
         vid_num = 0

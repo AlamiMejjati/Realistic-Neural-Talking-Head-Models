@@ -106,9 +106,10 @@ class LossCnt(nn.Module):
         for x_feat, xhat_feat in zip(vgg_x_features, vgg_xhat_features):
             loss19 += self.l1_loss(x_feat, xhat_feat)
 
-        loss = vgg19_weight * loss19 + vggface_weight * lossface
-
-        return loss
+        loss19 = vgg19_weight * loss19
+        lossface = vggface_weight * lossface
+        loss = loss19 + lossface
+        return {'vgg19_loss': loss19, 'vggface_loss': lossface}
 
 
 class LossAdv(nn.Module):
@@ -122,7 +123,9 @@ class LossAdv(nn.Module):
         for res, res_hat in zip(D_res_list, D_hat_res_list):
             lossFM += self.l1_loss(res, res_hat)
         
-        return -r_hat.mean() + lossFM * self.FM_weight
+        # return -r_hat.mean() + lossFM * self.FM_weight
+        loss_adv = -r_hat.mean()
+        return {'adv_loss': loss_adv, 'FM_loss': lossFM * self.FM_weight}
 
 
 class LossMatch(nn.Module):
@@ -148,7 +151,8 @@ class LossMatch(nn.Module):
         #B,8,512
         e_vectors = e_vectors.reshape(-1,512)
         #B*8,512
-        return self.l1_loss(e_vectors, W) * self.match_weight
+        match_loss = self.l1_loss(e_vectors, W) * self.match_weight
+        return {'match_loss': match_loss}
     
 class LossG(nn.Module):
     """
@@ -164,11 +168,16 @@ class LossG(nn.Module):
         self.lossMatch = LossMatch(device=device)
         
     def forward(self, x, x_hat, r_hat, D_res_list, D_hat_res_list, e_vectors, W, i):
-        loss_cnt = self.lossCnt(x, x_hat)
-        loss_adv = self.lossAdv(r_hat, D_res_list, D_hat_res_list)
-        loss_match = self.lossMatch(e_vectors, W, i)
+        dict_cnt = self.lossCnt(x, x_hat)
+        dict_adv = self.lossAdv(r_hat, D_res_list, D_hat_res_list)
+        dict_match = self.lossMatch(e_vectors, W, i)
+
+        super_dict = {}
+        for d in [dict_adv, dict_cnt, dict_match]:
+            for k, v in d.iteritems():  # d.items() in Python 3+
+                super_dict[k] = v
         #print(loss_cnt.item(), loss_adv.item(), loss_match.item())
-        return loss_cnt + loss_adv + loss_match
+        return super_dict
 
 class LossGF(nn.Module):
     """
@@ -183,6 +192,12 @@ class LossGF(nn.Module):
         self.lossAdv = LossAdv()
         
     def forward(self, x, x_hat, r_hat, D_res_list, D_hat_res_list):
-        loss_cnt = self.LossCnt(x, x_hat)
-        loss_adv = self.lossAdv(r_hat, D_res_list, D_hat_res_list)
-        return loss_cnt + loss_adv
+        dict_cnt = self.LossCnt(x, x_hat)
+        dict_adv = self.lossAdv(r_hat, D_res_list, D_hat_res_list)
+
+        super_dict = {}
+        for d in [dict_adv, dict_cnt]:
+            for k, v in d.iteritems():  # d.items() in Python 3+
+                super_dict[k] = v
+        #print(loss_cnt.item(), loss_adv.item(), loss_match.item())
+        return super_dict
