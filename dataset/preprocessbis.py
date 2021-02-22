@@ -11,6 +11,7 @@ from params.params import path_to_mp4, path_to_preprocess
 
 K = 8
 num_vid = 0
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 device = torch.device('cuda:0')
 face_aligner = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device ='cuda:0')
 # face_aligner = torch.nn.DataParallel(face_aligner)
@@ -98,40 +99,55 @@ def pick_images(video_path, pic_folder, num_images):
     cap.release()
     
     return frames_list
-    
 
+persons_list = []
+vid_id_list = []
+vid_list = []
+name_list = []
 for person_id in tqdm(os.listdir(path_to_mp4)):
-    for video_id in tqdm(os.listdir(os.path.join(path_to_mp4, person_id))):
-        for video in os.listdir(os.path.join(path_to_mp4, person_id, video_id)):
-            
-                
-            try:
-                savename = path_to_preprocess+"/"+str(num_vid//256)+"/"+str(num_vid)+".png"
-                if os.path.isfile(savename):
-                    num_vid += 1
-                    break
-                video_path = os.path.join(path_to_mp4, person_id, video_id, video)
-                frame_mark = pick_images(video_path, path_to_preprocess+'/' + person_id+'/'+video_id+'/'+video.split('.')[0], K)
-                frame_mark = generate_landmarks(frame_mark, face_aligner)
-                if len(frame_mark) == K:
-                    final_list = [frame_mark[i][0] for i in range(K)]
-                    for i in range(K):
-                        final_list.append(frame_mark[i][1]) #K*2,224,224,3
-                    final_list = np.array(final_list)
-                    final_list = np.transpose(final_list, [1,0,2,3])
-                    final_list = np.reshape(final_list, (224, 224*2*K, 3))
-                    final_list = cv2.cvtColor(final_list, cv2.COLOR_BGR2RGB)
-                    
-                    if not os.path.isdir(path_to_preprocess+"/"+str(num_vid//256)):
-                        os.mkdir(path_to_preprocess+"/"+str(num_vid//256))
-                        
-                    cv2.imwrite(path_to_preprocess+"/"+str(num_vid//256)+"/"+str(num_vid)+".png", final_list)
-                    num_vid += 1
-                    break #take only one video
 
-                    
-            except:
-                print('ERROR: ', video_path)
+    for video_id in tqdm(os.listdir(os.path.join(path_to_mp4, person_id))):
+
+        for video in os.listdir(os.path.join(path_to_mp4, person_id, video_id)):
+            savename = path_to_preprocess + "/" + str(num_vid // 256) + "/" + str(num_vid) + ".png"
+            persons_list.append(person_id)
+            vid_id_list.append(video_id)
+            vid_list.append(video)
+            name_list.append(savename)
+            num_vid += 1
+            break  # take only one video
+
+persons_list = persons_list[::-1]
+vid_id_list = vid_id_list[::-1]
+vid_list = vid_list[::-1]
+name_list = name_list[::-1]
+num_vid = 0
+for person_id, video_id, video in zip(persons_list, vid_id_list, vid_list):
+    try:
+        savename = name_list[num_vid]
+        if os.path.isfile(savename):
+            num_vid += 1
+            continue
+        video_path = os.path.join(path_to_mp4, person_id, video_id, video)
+        frame_mark = pick_images(video_path, path_to_preprocess+'/' + person_id+'/'+video_id+'/'+video.split('.')[0], K)
+        frame_mark = generate_landmarks(frame_mark, face_aligner)
+        if len(frame_mark) == K:
+            final_list = [frame_mark[i][0] for i in range(K)]
+            for i in range(K):
+                final_list.append(frame_mark[i][1]) #K*2,224,224,3
+            final_list = np.array(final_list)
+            final_list = np.transpose(final_list, [1,0,2,3])
+            final_list = np.reshape(final_list, (224, 224*2*K, 3))
+            final_list = cv2.cvtColor(final_list, cv2.COLOR_BGR2RGB)
+
+            if not os.path.isdir(os.path.dirname(savename)):
+                os.mkdir(os.path.dirname(savename))
+
+            cv2.imwrite(savename, final_list)
+            num_vid += 1
+
+    except:
+        print('ERROR: ', video_path)
             
         
 print('done')

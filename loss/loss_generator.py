@@ -26,8 +26,9 @@ class LossCnt(nn.Module):
         self.l1_loss = nn.L1Loss()
         self.conv_idx_list = [2,7,12,21,30] #idxes of conv layers in VGG19 cf.paper
 
-    def forward(self, x, x_hat, vgg19_weight=1.5e-1, vggface_weight=2.5e-2):        
+    def forward(self, x, x_hat, vgg19_weight=1., vggface_weight=0.1):
         """Retrieve vggface feature maps"""
+        ##vgg19_weight=1.5e-1, vggface_weight=2.5e-2
         with torch.no_grad(): #no need for gradient compute
             vgg_x_features = self.VGGFace(x) #returns a list of feature maps at desired layers
 
@@ -174,7 +175,7 @@ class LossG(nn.Module):
 
         super_dict = {}
         for d in [dict_adv, dict_cnt, dict_match]:
-            for k, v in d.iteritems():  # d.items() in Python 3+
+            for k, v in d.items():  # d.items() in Python 3+
                 super_dict[k] = v
         #print(loss_cnt.item(), loss_adv.item(), loss_match.item())
         return super_dict
@@ -197,7 +198,7 @@ class LossGF(nn.Module):
 
         super_dict = {}
         for d in [dict_adv, dict_cnt]:
-            for k, v in d.iteritems():  # d.items() in Python 3+
+            for k, v in d.items():  # d.items() in Python 3+
                 super_dict[k] = v
         #print(loss_cnt.item(), loss_adv.item(), loss_match.item())
         return super_dict

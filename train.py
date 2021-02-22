@@ -19,34 +19,34 @@ from network.model import *
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import datetime
-
+from utils import getIms, saver
 from params.params import *
+
 """Create dataset and net"""
-os.environ["CUDA_VISIBLE_DEVICES"]="1,2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = use_gpus
 display_training = False
 device = torch.device("cuda:0")
 cpu = torch.device("cpu")
 
-path_to_chkpt = os.path.join(path_to_chkpt, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+path_to_save = os.path.join(path_to_save, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+os.makedirs(path_to_save, exist_ok=True)
+path_to_chkpt = os.path.join(path_to_save, path_to_chkpt)
 
 dataset = PreprocessDataset(K=K, path_to_preprocess=path_to_preprocess, path_to_Wi=path_to_Wi)
+batch_size = torch.cuda.device_count() * batch_size
 # dataset = VidDataSet(K=K, path_to_mp4=path_to_preprocess, device=device)
 dataLoader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                        num_workers=16,
+                        num_workers=nb_workers,
                         pin_memory=True,
-                        drop_last = True)
+                        drop_last=True)
 
 if torch.cuda.device_count() > 1:
     print("Let's use", torch.cuda.device_count(), "GPUs!")
-    # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-    G = nn.DataParallel(Generator(frame_shape).to(device))
-    E = nn.DataParallel(Embedder(frame_shape).to(device))
-    D = nn.DataParallel(Discriminator(dataset.__len__(), path_to_Wi).to(device))
+G = nn.DataParallel(Generator(frame_shape).to(device))
+E = nn.DataParallel(Embedder(frame_shape).to(device))
+D = nn.DataParallel(Discriminator(dataset.__len__(), path_to_Wi).to(device))
 
-else:
-    G = Generator(frame_shape).to(device)
-    E = Embedder(frame_shape).to(device)
-    D = Discriminator(dataset.__len__(), path_to_Wi).to(device)
+
 
 G.train()
 E.train()
@@ -116,21 +116,17 @@ E.train()
 D.train()
 
 """Training"""
-batch_start = datetime.now()
 pbar = tqdm(dataLoader, leave=True, initial=0)
-if not display_training:
-    matplotlib.use('agg')
-
-writer = SummaryWriter()
-
+writer = SummaryWriter(log_dir=path_to_save)
 counter = 0
+
 for epoch in range(epochCurrent, num_epochs):
     if epoch > epochCurrent:
         i_batch_current = 0
         pbar = tqdm(dataLoader, leave=True, initial=0)
     pbar.set_postfix(epoch=epoch)
     for i_batch, (f_lm, x, g_y, i, W_i) in enumerate(pbar, start=0):
-        
+
         f_lm = f_lm.to(device)
         x = x.to(device)
         g_y = g_y.to(device)
@@ -161,10 +157,10 @@ for epoch in range(epochCurrent, num_epochs):
                 r, D_res_list = D(x, g_y, i)"""
 
                 dict_loss_G = criterionG(x, x_hat, r_hat, D_res_list, D_hat_res_list, e_vectors, D.module.W_i, i)
-                lossG = torch.tensor(0.)
-                for k,v in dict_loss_G.iteritems():
+                for k,v in dict_loss_G.items():
                     writer.add_scalar("Loss/train/" + k, v, counter)
-                    lossG += v
+
+                lossG = sum(dict_loss_G.values())
 
                 """####################################################################################################################################################
                 lossD = criterionDfake(r_hat) + criterionDreal(r)
@@ -174,6 +170,7 @@ for epoch in range(epochCurrent, num_epochs):
                 optimizerD.step()"""
                 
                 lossG.backward(retain_graph=False)
+                # dict_loss_G['adv_loss'].backward(retain_graph=False)
                 optimizerG.step()
                 #optimizerD.step()
             
@@ -186,30 +183,28 @@ for epoch in range(epochCurrent, num_epochs):
 
                 r, D_res_list = D(x, g_y, i)
                 lossDreal = criterionDreal(r)
-                
+
                 lossD = lossDfake + lossDreal
                 lossD.backward(retain_graph=False)
                 optimizerD.step()
                 #for p in D.module.parameters():
                  #   p.data.clamp_(-1.0, 1.0)
-                
-                
-                optimizerD.zero_grad()
-                r_hat, D_hat_res_list = D(x_hat, g_y, i)
-                lossDfake = criterionDfake(r_hat)
 
-                r, D_res_list = D(x, g_y, i)
-                lossDreal = criterionDreal(r)
-                
-                lossD = lossDfake + lossDreal
+
+                # optimizerD.zero_grad()
+                # r_hat, D_hat_res_list = D(x_hat, g_y, i)
+                # lossDfake = criterionDfake(r_hat)
+                #
+                # r, D_res_list = D(x, g_y, i)
+                # lossDreal = criterionDreal(r)
+                #
+                # lossD = lossDfake + lossDreal
+                # lossD.backward(retain_graph=False)
+                # optimizerD.step()
+
                 writer.add_scalar("Loss/train/lossDreal", lossDreal, counter)
                 writer.add_scalar("Loss/train/lossDfake", lossDfake, counter)
                 writer.add_scalar("Loss/train/lossD", lossD, counter)
-                lossD.backward(retain_graph=False)
-                optimizerD.step()
-                #for p in D.module.parameters():
-                 #   p.data.clamp_(-1.0, 1.0)
-
         for enum, idx in enumerate(i):
             torch.save({'W_i': D.module.W_i[:,enum].unsqueeze(-1)}, path_to_Wi+'/W_'+str(idx.item())+'/W_'+str(idx.item())+'.tar')
                     
@@ -227,76 +222,11 @@ for epoch in range(epochCurrent, num_epochs):
                      lossD.item(), lossG.item(), r.mean(), r_hat.mean()))
             pbar.set_postfix(epoch=epoch, r=r.mean().item(), rhat=r_hat.mean().item(), lossG=lossG.item())
 
-            if display_training:
-                plt.figure(figsize=(10,10))
-                plt.clf()
-                out = (x_hat[0]*255).transpose(0,2)
-                for img_no in range(1,x_hat.shape[0]//16):
-                    out = torch.cat((out, (x_hat[img_no]*255).transpose(0,2)), dim = 1)
-                out = out.type(torch.int32).to(cpu).numpy()
-                fig = out
-
-                plt.clf()
-                out = (x[0]*255).transpose(0,2)
-                for img_no in range(1,x.shape[0]//16):
-                    out = torch.cat((out, (x[img_no]*255).transpose(0,2)), dim = 1)
-                out = out.type(torch.int32).to(cpu).numpy()
-                fig = np.concatenate((fig, out), 0)
-
-                plt.clf()
-                out = (g_y[0]*255).transpose(0,2)
-                for img_no in range(1,g_y.shape[0]//16):
-                    out = torch.cat((out, (g_y[img_no]*255).transpose(0,2)), dim = 1)
-                out = out.type(torch.int32).to(cpu).numpy()
-                
-                fig = np.concatenate((fig, out), 0)
-                plt.imshow(fig)
-                plt.xticks([])
-                plt.yticks([])
-                plt.draw()
-                plt.pause(0.001)
-            
-            
-
         if i_batch % log_freq == 0:
-
-            print('Saving latest...')
-            torch.save({
-                    'epoch': epoch,
-                    'lossesG': lossesG,
-                    'lossesD': lossesD,
-                    'E_state_dict': E.module.state_dict(),
-                    'G_state_dict': G.module.state_dict(),
-                    'D_state_dict': D.module.state_dict(),
-                    'num_vid': dataset.__len__(),
-                    'i_batch': i_batch,
-                    'optimizerG': optimizerG.state_dict(),
-                    'optimizerD': optimizerD.state_dict()
-                    }, path_to_chkpt)
-            out = (x_hat[0]*255).transpose(0,2)
-            for img_no in range(1,2):
-                out = torch.cat((out, (x_hat[img_no]*255).transpose(0,2)), dim = 1)
-            out = out.type(torch.uint8).to(cpu).numpy()
-            plt.imsave("recent.png", out)
-            print('...Done saving latest')
-            
+            saver(epoch, lossesG, lossesD, E, D, G, dataset, i_batch, optimizerG,
+                  optimizerD, path_to_chkpt, x, x_hat, g_y, f_lm, counter, writer)
+        counter += 1
     if epoch%1 == 0:
-        print('Saving latest...')
-        torch.save({
-                'epoch': epoch+1,
-                'lossesG': lossesG,
-                'lossesD': lossesD,
-                'E_state_dict': E.module.state_dict(),
-                'G_state_dict': G.module.state_dict(),
-                'D_state_dict': D.module.state_dict(),
-                'num_vid': dataset.__len__(),
-                'i_batch': i_batch,
-                'optimizerG': optimizerG.state_dict(),
-                'optimizerD': optimizerD.state_dict()
-                }, path_to_chkpt)
-        out = (x_hat[0]*255).transpose(0,2)
-        for img_no in range(1,2):
-            out = torch.cat((out, (x_hat[img_no]*255).transpose(0,2)), dim = 1)
-        out = out.type(torch.uint8).to(cpu).numpy()
-        plt.imsave("recent_backup.png", out)
+        saver(epoch, lossesG, lossesD, E, D, G, dataset, i_batch, optimizerG,
+              optimizerD, path_to_chkpt, x, x_hat, g_y, f_lm, counter, writer)
         print('...Done saving latest')

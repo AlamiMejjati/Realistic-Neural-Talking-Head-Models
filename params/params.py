@@ -4,17 +4,22 @@
 K = 8
 
 #path to main weight
-path_to_chkpt = './train_log/model_weights.tar'
+path_to_chkpt = 'model_weights.tar'
 
 #path to backup
-path_to_backup = './train_log/backup_model_weights.tar'
+path_to_backup = 'backup_model_weights.tar'
 
 #CHANGE first part
 path_to_Wi = ""+"Wi_weights"
 #path_to_Wi = "test/"+"Wi_weights"
 
-#CHANGE if better gpu
-batch_size = 6
+
+#batch size per gpu
+batch_size = 2
+
+#nb workers
+
+nb_workers = 8
 
 #dataset save path
 path_to_preprocess = '/home/youssef/Documents/phdYoop/datasets/vox2/dev/ims'
@@ -27,9 +32,12 @@ path_to_mp4 = '/home/youssef/Documents/phdYoop/datasets/vox2/dev/mp4'
 
 path_to_save = './train_log'
 
-
 #frequency of printing
 print_freq = 100
 
 #frequency of image logs
 log_freq = 1000
+
+# gpus to use
+
+use_gpus = '0,1,2,3'

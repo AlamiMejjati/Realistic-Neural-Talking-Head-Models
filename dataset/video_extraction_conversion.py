@@ -37,6 +37,7 @@ def select_frames(video_path, K):
         
         if ret and rand_frames_idx[frame_idx] == 1:
             RGB = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            RGB = cv2.resize(RGB, (256, 256))
             frames_list.append(RGB)
             
         frame_idx += 1
@@ -64,9 +65,11 @@ def select_frames(video_path, K):
     
 def select_preprocess_frames(frames_path):
     img = cv2.imread(frames_path)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    
-    images_list =  [img[:, i*224:(i+1)*224, :] for i in range(8)]
+    try:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    except:
+        print(frames_path)
+    images_list = [img[:, i*224:(i+1)*224, :] for i in range(8)]
     landmark_list = [img[:, i*224:(i+1)*224, :] for i in range(8,16)]
     
     return [image_frame_tuple for image_frame_tuple in zip(images_list, landmark_list)]
@@ -126,6 +129,7 @@ def select_images_frames(path_to_images):
     for image_name in os.listdir(path_to_images):
         img = cv2.imread(os.path.join(path_to_images, image_name))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (224,256))
         images_list.append(img)
     return images_list
 

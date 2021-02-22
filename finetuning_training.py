@@ -12,8 +12,12 @@ from dataset.dataset_class import FineTuningImagesDataset, FineTuningVideoDatase
 from network.model import *
 from loss.loss_discriminator import *
 from loss.loss_generator import *
+from torch.utils.tensorboard import SummaryWriter
+from params.params import path_to_Wi
 
-from params.params import K, path_to_chkpt, path_to_backup, path_to_Wi, batch_size, path_to_preprocess, frame_shape
+from utils import imsaver
+
+import os
 
 """Hyperparameters and config"""
 display_training = True
@@ -21,27 +25,34 @@ if not display_training:
 	matplotlib.use('agg')
 device = torch.device("cuda:0")
 cpu = torch.device("cpu")
-path_to_embedding = 'e_hat_video.tar'
-path_to_save = 'finetuned_model.tar'
-path_to_video = 'examples/fine_tuning/test_video.mp4'
-path_to_images = 'examples/fine_tuning/test_images'
+path_to_chkpt = '/home/youssef/Documents/phdYoop/Realistic-Neural-Talking-Head-Models/' \
+                'train_log/2021-02-18_20-42-21/model_weights.tar'
+save_path = '/media/youssef/SSD2/phdYoop/Realistic-Neural-Talking-Head-Models/personalData/paul'
+
+path_to_save = os.path.join(save_path, 'models', 'finetuned_model.tar')
+path_to_video = os.path.join(save_path, 'vid', '00059.mp4')
+path_to_images = os.path.join(save_path, 'ims')
 
 
 """Create dataset and net"""
 choice = ''
 while choice != '0' and choice != '1':
     choice = input('What source to finetune on?\n0: Video\n1: Images\n\nEnter number\n>>')
+
 if choice == '0': #video
     dataset = FineTuningVideoDataset(path_to_video, device)
+    path_to_embedding = os.path.join(save_path, 'latent', 'e_hat_video.tar')
 else: #Images
     dataset = FineTuningImagesDataset(path_to_images, device)
+    path_to_embedding = os.path.join(save_path, 'latent', 'e_hat_images.tar')
+
 dataLoader = DataLoader(dataset, batch_size=2, shuffle=False)
 
 e_hat = torch.load(path_to_embedding, map_location=cpu)
 e_hat = e_hat['e_hat']
 
-G = Generator(256, finetuning = True, e_finetuning = e_hat)
-D = Discriminator(dataset.__len__(), path_to_Wi, finetuning = True, e_finetuning = e_hat)
+G = Generator(256, finetuning=True, e_finetuning=e_hat)
+D = Discriminator(dataset.__len__(), path_to_Wi, finetuning=True, e_finetuning=e_hat)
 
 G.train()
 D.train()
@@ -90,6 +101,8 @@ D.to(device)
 batch_start = datetime.now()
 
 cont = True
+counter = 0
+writer = SummaryWriter(log_dir=os.path.join(save_path, 'models'))
 while cont:
     for epoch in range(num_epochs):
         for i_batch, (x, g_y) in enumerate(dataLoader):
@@ -105,12 +118,11 @@ while cont:
                 with torch.no_grad():
                     r, D_res_list = D(x, g_y, i=0)
     
-                lossG = criterionG(x, x_hat, r_hat, D_res_list, D_hat_res_list)
-    
+                dict_loss_G = criterionG(x, x_hat, r_hat, D_res_list, D_hat_res_list)
+                lossG = sum(dict_loss_G.values())
                 lossG.backward(retain_graph=False)
                 optimizerG.step()
-                
-                
+
                 #train D
                 optimizerD.zero_grad()
                 x_hat.detach_().requires_grad_()
@@ -126,17 +138,17 @@ while cont:
                 
                 
                 #train D again
-                optimizerG.zero_grad()
-                optimizerD.zero_grad()
-                r_hat, D_hat_res_list = D(x_hat, g_y, i=0)
-                r, D_res_list = D(x, g_y, i=0)
-    
-                lossDfake = criterionDfake(r_hat)
-                lossDreal = criterionDreal(r)
-    
-                lossD = lossDreal + lossDfake
-                lossD.backward(retain_graph=False)
-                optimizerD.step()
+                # optimizerG.zero_grad()
+                # optimizerD.zero_grad()
+                # r_hat, D_hat_res_list = D(x_hat, g_y, i=0)
+                # r, D_res_list = D(x, g_y, i=0)
+                #
+                # lossDfake = criterionDfake(r_hat)
+                # lossDreal = criterionDreal(r)
+                #
+                # lossD = lossDreal + lossDfake
+                # lossD.backward(retain_graph=False)
+                # optimizerD.step()
     
     
             # Output training stats
@@ -150,61 +162,10 @@ while cont:
                 print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(y)): %.4f'
                       % (epoch, num_epochs, i_batch, len(dataLoader),
                          lossD.item(), lossG.item(), r.mean(), r_hat.mean()))
-                """
-                plt.clf()
-                out = x_hat.transpose(1,3)[0]
-                for img_no in range(1,x_hat.shape[0]):
-                    out = torch.cat((out, x_hat.transpose(1,3)[img_no]), dim = 1)
-                out = out.type(torch.int32).to(cpu).numpy()*255
-                plt.imshow(out)
-                plt.show()
-    
-                plt.clf()
-                out = x.transpose(1,3)[0]
-                for img_no in range(1,x.shape[0]):
-                    out = torch.cat((out, x.transpose(1,3)[img_no]), dim = 1)
-                out = out.type(torch.int32).to(cpu).numpy()*255
-                plt.imshow(out)
-                plt.show()
-    
-                plt.clf()
-                out = g_y.transpose(1,3)[0]
-                for img_no in range(1,g_y.shape[0]):
-                    out = torch.cat((out, g_y.transpose(1,3)[img_no]), dim = 1)
-                out = out.type(torch.int32).to(cpu).numpy()*255
-                plt.imshow(out)
-                plt.show()
-    
-            lossesD.append(lossD.item())
-            lossesG.append(lossG.item())"""
-            if display_training:
-                    plt.clf()
-                    out = (x_hat[0]*255).transpose(0,2)
-                    for img_no in range(1,x_hat.shape[0]):
-                        out = torch.cat((out, (x_hat[img_no]*255).transpose(0,2)), dim = 1)
-                    out = out.type(torch.int32).to(cpu).numpy()
-                    fig = out
-    
-                    plt.clf()
-                    out = (x[0]*255).transpose(0,2)
-                    for img_no in range(1,x.shape[0]):
-                        out = torch.cat((out, (x[img_no]*255).transpose(0,2)), dim = 1)
-                    out = out.type(torch.int32).to(cpu).numpy()
-                    fig = np.concatenate((fig, out), 0)
-    
-                    plt.clf()
-                    out = (g_y[0]*255).transpose(0,2)
-                    for img_no in range(1,g_y.shape[0]):
-                        out = torch.cat((out, (g_y[img_no]*255).transpose(0,2)), dim = 1)
-                    out = out.type(torch.int32).to(cpu).numpy()
-                    
-                    fig = np.concatenate((fig, out), 0)
-                    plt.imshow(fig)
-                    plt.xticks([])
-                    plt.yticks([])
-                    plt.draw()
-                    plt.pause(0.001)
-        
+
+                imsaver(x, x_hat, g_y, counter, writer)
+                counter+=1
+
     num_epochs = int(input('Num epoch further?\n'))
     cont = num_epochs != 0
 

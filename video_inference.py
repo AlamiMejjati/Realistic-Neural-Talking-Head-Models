@@ -8,15 +8,15 @@ from network.blocks import *
 from network.model import *
 from webcam_demo.webcam_extraction_conversion import *
 
-from params.params import path_to_chkpt
 from tqdm import tqdm
 
 """Init"""
 
 #Paths
-path_to_model_weights = 'finetuned_model.tar'
-path_to_embedding = 'e_hat_video.tar'
-path_to_mp4 = 'test_vid2.webm'
+path_to_chkpt = '/home/youssef/Documents/phdYoop/Realistic-Neural-Talking-Head-Models/personalData/paul'
+path_to_model_weights = os.path.join(path_to_chkpt, 'models', 'finetuned_model.tar')
+path_to_embedding = os.path.join(path_to_chkpt, 'latent', 'e_hat_images.tar')
+path_to_mp4 = '/home/youssef/Documents/phdYoop/Realistic-Neural-Talking-Head-Models/examples/fine_tuning/test_video.mp4'
 
 device = torch.device("cuda:0")
 cpu = torch.device("cpu")
@@ -42,7 +42,7 @@ ret = True
 i = 0
 size = (256*3,256)
 #out = cv2.VideoWriter('project.mp4',cv2.VideoWriter_fourcc('M','P','4','2'), 30, size)
-video = cv2.VideoWriter('project.mp4',cv2.VideoWriter_fourcc(*'DIVX'), fps, size)
+video = cv2.VideoWriter(os.path.join(path_to_chkpt, 'res', os.path.basename(path_to_mp4)),cv2.VideoWriter_fourcc(*'DIVX'), fps, size)
 
 with torch.no_grad():
     while ret:
